@@ -276,7 +276,8 @@ function badges(b) {
 }
 function renderList() {
   const LIMIT = 300;
-  $("sb-count").textContent = `(${nf.format(shown.length)})`;
+  $("tb-count").textContent = nf.format(shown.length);
+  $("btn-show").textContent = `Show ${nf.format(shown.length)} buildings`;
   const head = el("div", { class: "res-head" },
     el("b", { text: `${nf.format(shown.length)} buildings` }),
     el("div", { class: "muted", text: `${nf.format(shown.reduce((a, b) => a + b.m2, 0))} m² in total` }),
@@ -295,8 +296,12 @@ function select(b, fly) {
   map.getSource("sel")?.setData({ type: "FeatureCollection", features: [
     { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [b.coords] } },
     { type: "Feature", properties: {}, geometry: { type: "Point", coordinates: b.c } }] });
-  if (isPhone()) { setTab("list"); if (sheetPx() < sheetSizes().mid) setSheet(sheetSizes().mid); }
-  if (fly || isPhone()) map.flyTo({ center: b.c, zoom: Math.max(map.getZoom(), 17), speed: 1.6, padding: mapPadding() });
+  if (isPhone() && tab() === "map") { // tapped on the map: a small card, details one tap away
+    showCard(b);
+    map.easeTo({ center: b.c, padding: mapPadding(), duration: 400 });
+    return;
+  }
+  if (fly) map.flyTo({ center: b.c, zoom: Math.max(map.getZoom(), 17), speed: 1.6, padding: mapPadding() });
   renderDetail();
 }
 function renderDetail() {
@@ -319,7 +324,8 @@ function renderDetail() {
     b.sig.length ? el("p", { class: "why" }, el("b", { text: "Why it's flagged: " }), whyFlagged(b)) : null,
     el("div", { class: "row" },
       el("a", { class: "button primary", href: streetView(lat, lon), target: "_blank", rel: "noopener", text: "Walk around in Street View ↗" }),
-      el("button", { type: "button", text: "Aerial view", on: { click: () => aerialView(b) } }),
+      isPhone() ? el("button", { type: "button", text: "Show on map", on: { click: () => { setTab("map"); showCard(b); map.flyTo({ center: b.c, zoom: 17.5, speed: 1.6, padding: mapPadding() }); } } }) : null,
+      el("button", { type: "button", text: "Aerial view", on: { click: () => { if (isPhone()) { setTab("map"); showCard(b); } aerialView(b); } } }),
       el("button", { type: "button", text: "Copy summary", on: { click: (e) => copySummary(b, e.target) } })),
     el("dl", { class: "kv" },
       el("dt", { text: "Main use" }), el("dd", { text: FUNCS[b.main]?.en || "–" }),
@@ -480,67 +486,39 @@ $("btn-about").onclick = () => {
   $("about").showModal();
 };
 
-// ---------- phone: bottom sheet ----------
-const phoneQuery = matchMedia("(max-width: 820px)");
+// ---------- phone: tabs (List · Map · Filters) ----------
+const phoneQuery = matchMedia("(max-width: 820px), (max-height: 500px) and (max-width: 1000px)");
 const isPhone = () => phoneQuery.matches;
-const BAR = 52;
-const sheetSizes = () => {
-  const avail = innerHeight - 52 - BAR; // below the header, above the bar
-  return { min: Math.round(avail * 0.18), mid: Math.round(avail * 0.45), max: Math.round(avail - 24) };
-};
-let sheet = null;
-const sheetPx = () => sheet ?? sheetSizes().mid;
-function setSheet(px) {
-  const s = sheetSizes();
-  sheet = Math.max(0, Math.min(s.max, px));
-  document.documentElement.style.setProperty("--sheet", sheet + "px");
+const tab = () => document.body.dataset.tab;
+const mapPadding = () => (isPhone() ? { top: 90, bottom: $("card").hidden ? 30 : 200, left: 20, right: 20 } : { top: 40, bottom: 40, left: 40, right: 40 });
+function setTab(t) {
+  document.body.dataset.tab = t;
+  document.querySelectorAll("#tabbar button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.tab === t ? "true" : "false"));
+  if (t === "map" && map) requestAnimationFrame(() => map.resize());
+  if (t !== "map") $("card").hidden = true;
 }
-const mapPadding = () => (isPhone() ? { top: 90, bottom: sheetPx() + BAR + 16, left: 20, right: 20 } : { top: 40, bottom: 40, left: 40, right: 40 });
-function setTab(tab) {
-  document.body.dataset.tab = tab;
-  document.querySelectorAll(".sheet-tabs button").forEach((b) => b.setAttribute("aria-selected", b.dataset.tab === tab ? "true" : "false"));
+function showCard(b) {
+  const card = $("card");
+  put(card,
+    el("button", { type: "button", class: "x", "aria-label": "Close", text: "✕", on: { click: () => { card.hidden = true; closeDetail(); } } }),
+    el("b", { text: b.adres }),
+    el("div", { class: "li-sub", text: [b.postcode, FUNCS[b.main]?.en, nf.format(b.m2) + " m²", b.year && "built " + b.year].filter(Boolean).join(" · ") }),
+    el("div", { class: "badges" }, badges(b)),
+    el("div", { class: "row" },
+      el("button", { type: "button", class: "primary", text: "Details", on: { click: () => { setTab("list"); renderDetail(); } } }),
+      el("a", { class: "button", href: streetView(b.c[1], b.c[0]), target: "_blank", rel: "noopener", text: "Street View ↗" })));
+  card.hidden = false;
 }
-function initSheet() {
+function initTabs() {
   setTab("list");
-  if (isPhone()) setSheet(sheetSizes().mid);
-  const bar = $("sheetbar");
-  let drag = null;
-  bar.addEventListener("pointerdown", (e) => {
-    if (e.target.closest("button")) return; // the tabs are buttons
-    bar.setPointerCapture(e.pointerId);
-    drag = { y: e.clientY, start: sheetPx(), moved: false };
-    document.body.classList.add("dragging");
-  });
-  bar.addEventListener("pointermove", (e) => {
-    if (!drag) return;
-    const dy = drag.y - e.clientY;
-    if (Math.abs(dy) > 6) drag.moved = true;
-    if (drag.moved) setSheet(drag.start + dy);
-  });
-  const end = () => {
-    if (!drag) return;
-    document.body.classList.remove("dragging");
-    const s = sheetSizes(), now = sheetPx();
-    if (!drag.moved) { // a tap cycles small → medium → large → small
-      setSheet(now < s.mid - 10 ? s.mid : now < s.max - 10 ? s.max : s.min);
-    } else { // snap to the nearest size
-      setSheet([s.min, s.mid, s.max].reduce((a, v) => (Math.abs(v - now) < Math.abs(a - now) ? v : a)));
-    }
-    drag = null;
-  };
-  bar.addEventListener("pointerup", end);
-  bar.addEventListener("pointercancel", end);
-  document.querySelectorAll(".sheet-tabs button").forEach((b) => b.addEventListener("click", () => {
-    setTab(b.dataset.tab);
-    if (sheetPx() < sheetSizes().mid) setSheet(sheetSizes().mid);
-  }));
-  addEventListener("resize", () => { if (isPhone()) setSheet(Math.min(sheetPx(), sheetSizes().max)); });
+  document.querySelectorAll("#tabbar button").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab)));
+  $("btn-show").addEventListener("click", () => { closeDetail(); setTab("list"); $("side").scrollTop = 0; });
 }
 
 // ---------- start ----------
 (async () => {
   // The list and filters don't wait for the map: map tiles can be slow.
-  initSheet();
+  initTabs();
   const mapReady = initMap();
   try {
     await load();

@@ -19,14 +19,6 @@
   </header>
 
   <main>
-    <!-- Phone only: the bar on top of the bottom sheet (drag or tap to resize, switch tabs). -->
-    <div id="sheetbar" role="toolbar" aria-label="Panel">
-      <div class="handle" aria-hidden="true"></div>
-      <div class="sheet-tabs" role="tablist">
-        <button type="button" role="tab" data-tab="list" aria-selected="true">List <span id="sb-count"></span></button>
-        <button type="button" role="tab" data-tab="filters" aria-selected="false">Filters</button>
-      </div>
-    </div>
     <aside id="filters" aria-label="Filters">
       <section>
         <h2>Quick views</h2>
@@ -62,6 +54,7 @@
         <label class="field"><span>Status</span><select id="f-track"></select></label>
       </section>
       <div class="row"><button id="btn-reset" type="button">Reset filters</button></div>
+      <div class="show-results"><button id="btn-show" type="button" class="primary">Show results</button></div>
     </aside>
 
     <section id="mapwrap">
@@ -82,13 +75,22 @@
         </label>
       </div>
       <div id="legend" class="legend"></div>
+      <!-- Phone only: the building you tapped on the map -->
+      <div id="card" hidden></div>
     </section>
 
     <aside id="side" aria-live="polite">
-      <div id="results"></div>
+      <div id="results"><p class="more">Loading 34,000 buildings in Leiden…</p></div>
       <div id="detail" hidden></div>
     </aside>
   </main>
+
+  <!-- Phone only: tabs at the bottom of the screen -->
+  <nav id="tabbar" aria-label="Views">
+    <button type="button" data-tab="list" aria-pressed="true"><span class="ico" aria-hidden="true">☰</span>List <span id="tb-count"></span></button>
+    <button type="button" data-tab="map" aria-pressed="false"><span class="ico" aria-hidden="true">◎</span>Map</button>
+    <button type="button" data-tab="filters" aria-pressed="false"><span class="ico" aria-hidden="true">⚙</span>Filters</button>
+  </nav>
 
   <dialog id="about">
     <form method="dialog">
