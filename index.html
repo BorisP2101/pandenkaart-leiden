@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Leiden Building Finder</title>
+  <meta name="description" content="Prototype: find vacant, old or underused buildings in Leiden from open data, filter them and keep track of follow-up.">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Leiden Building Finder <span class="tag">prototype</span></h1>
+    <p id="summary" class="muted">Loading open data…</p>
+    <div class="head-actions">
+      <button id="btn-export" type="button">Export CSV</button>
+      <button id="btn-about" type="button">How it works</button>
+    </div>
+  </header>
+
+  <main>
+    <aside id="filters" aria-label="Filters">
+      <section>
+        <h2>Quick views</h2>
+        <div id="presets" class="chips"></div>
+      </section>
+      <section>
+        <h2>Search</h2>
+        <input id="f-q" type="search" placeholder="Street, postcode or BAG id" autocomplete="off">
+      </section>
+      <section>
+        <h2>Signals</h2>
+        <div id="f-signals" class="checks"></div>
+        <label class="field"><span>Rijksmonument</span>
+          <select id="f-monument"><option value="">Any</option><option value="only">Only monuments</option><option value="exclude">Exclude monuments</option></select>
+        </label>
+      </section>
+      <section>
+        <h2>Use (function)</h2>
+        <div id="f-functions" class="checks two"></div>
+        <label class="check small"><input id="f-func-any" type="checkbox"> Match any unit, not only the main use</label>
+      </section>
+      <section>
+        <h2>Size and age</h2>
+        <div class="grid2">
+          <label class="field"><span>Floor area from (m²)</span><input id="f-m2-min" type="number" min="0" step="50" inputmode="numeric"></label>
+          <label class="field"><span>to (m²)</span><input id="f-m2-max" type="number" min="0" step="50" inputmode="numeric"></label>
+          <label class="field"><span>Built from (year)</span><input id="f-y-min" type="number" min="1000" max="2100" inputmode="numeric"></label>
+          <label class="field"><span>to (year)</span><input id="f-y-max" type="number" min="1000" max="2100" inputmode="numeric"></label>
+        </div>
+      </section>
+      <section>
+        <h2>My follow-up</h2>
+        <label class="field"><span>Status</span><select id="f-track"></select></label>
+      </section>
+      <div class="row"><button id="btn-reset" type="button">Reset filters</button></div>
+    </aside>
+
+    <section id="mapwrap">
+      <div id="map" role="region" aria-label="Map of Leiden buildings"></div>
+      <div class="map-tools">
+        <label>Colour by
+          <select id="colour-by">
+            <option value="signal">Signals</option>
+            <option value="function">Main use</option>
+            <option value="year">Year built</option>
+          </select>
+        </label>
+        <label>Base map
+          <select id="basemap">
+            <option value="grijs">Map (grey)</option>
+            <option value="luchtfoto">Aerial photo</option>
+          </select>
+        </label>
+      </div>
+      <div id="legend" class="legend"></div>
+    </section>
+
+    <aside id="side" aria-live="polite">
+      <div id="results"></div>
+      <div id="detail" hidden></div>
+    </aside>
+  </main>
+
+  <dialog id="about">
+    <form method="dialog">
+      <h2>How it works</h2>
+      <div id="about-body"></div>
+      <div class="row"><button class="primary">Close</button></div>
+    </form>
+  </dialog>
+
+  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
