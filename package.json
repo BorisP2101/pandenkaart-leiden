@@ -1,0 +1,6 @@
+{
+  "name": "pandenkaart-leiden",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node test/notices.test.mjs", "start": "python3 -m http.server 8080" }
+}

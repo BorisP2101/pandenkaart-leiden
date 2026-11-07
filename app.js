@@ -1,6 +1,7 @@
 // Leiden Building Finder: filter Leiden's buildings (BAG) on use, size, age and
 // signals of vacancy, demolition or change of use, and keep track of follow-up.
 /* global maplibregl */
+import { classifyNotice, NOTICE_TYPES, PHASES } from "./notices.js";
 
 const FUNCS = {
   woonfunctie: { en: "Residential", c: "#c9b79c" },
@@ -25,17 +26,20 @@ const STATUS_EN = {
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const SIGNALS = [
   { key: "vacant", label: "Out of use (BAG)", color: "--s-vacant", weight: 3,
-    help: "The building, or at least one unit in it, is registered as out of use in the BAG.",
+    help: "The building, or at least one unit in it, is registered as out of use in the BAG. Rare: the BAG mostly uses it for buildings that can't be used at all.",
     test: (b) => b.status === "Pand buiten gebruik" || b.vboOut > 0 },
   { key: "vacancy", label: "Vacancy notice", color: "--s-vacant", weight: 3,
-    help: "A municipal notice mentions vacancy (e.g. a Leegstandwet permit for temporary letting).",
-    test: (b) => b.kinds.has("leegstand") },
-  { key: "demolition", label: "Demolition", color: "--s-demo", weight: 2,
-    help: "BAG status 'demolition permit granted', or a permit notice mentioning demolition (sometimes only part of the building).",
-    test: (b) => b.status === "Sloopvergunning verleend" || b.kinds.has("sloop") },
-  { key: "change", label: "Change of use notice", color: "--s-change", weight: 1,
-    help: "A permit notice about changing the use of the building, or transformation.",
-    test: (b) => b.kinds.has("functiewijziging") },
+    help: "A permit mentions vacancy, e.g. anti-squat use (anti-leegstand) or a Leegstandwet permit.",
+    test: (b) => b.nsig.has("vacancy") },
+  { key: "temporary", label: "Temporary use", color: "--s-vacant", weight: 2,
+    help: "A permit for temporary use of a building (not an event). Often means the building is waiting for a new purpose.",
+    test: (b) => b.nsig.has("temporary") },
+  { key: "demolition", label: "Demolition", color: "--s-demo", weight: 3,
+    help: "BAG status 'demolition permit granted', or a permit to demolish the whole building. Sheds, walls and extensions don't count.",
+    test: (b) => b.status === "Sloopvergunning verleend" || b.nsig.has("demolition") },
+  { key: "transformation", label: "Transformation", color: "--s-change", weight: 2,
+    help: "A permit to turn the building (or part of it) into housing or a shelter, e.g. office to homes. Café terraces, shops changing trade and splitting a home don't count.",
+    test: (b) => b.nsig.has("transformation") },
   { key: "renovation", label: "Renovation (BAG)", color: "--s-reno", weight: 1,
     help: "The building or a unit is registered as under renovation.",
     test: (b) => b.status === "Verbouwing pand" || b.vboReno > 0 },
@@ -49,8 +53,9 @@ const YEARS = [
 const PRESETS = [
   { key: "all", label: "All buildings", f: {} },
   { key: "signals", label: "Any signal", f: { signals: SIGNALS.map((s) => s.key) } },
-  { key: "vacant", label: "Possibly vacant", f: { signals: ["vacant", "vacancy"] } },
+  { key: "vacant", label: "Possibly vacant", f: { signals: ["vacant", "vacancy", "temporary"] } },
   { key: "demolition", label: "Demolition", f: { signals: ["demolition"] } },
+  { key: "transformation", label: "Transformation to housing", f: { signals: ["transformation"] } },
   { key: "offices", label: "Old offices ≥ 500 m²", f: { funcs: ["kantoorfunctie"], m2Min: 500, yMax: 1990 } },
   { key: "transform", label: "Transformation candidates", f: { funcs: ["kantoorfunctie", "industriefunctie", "winkelfunctie"], m2Min: 1000, yMax: 1980 } },
   { key: "monuments", label: "Monuments with a signal", f: { monument: "only", signals: SIGNALS.map((s) => s.key) } },
@@ -74,6 +79,8 @@ const el = (tag, attrs = {}, ...kids) => {
   return e;
 };
 const nf = new Intl.NumberFormat("en-GB");
+// replaceChildren() turns null into the text "null"; this skips empty parts.
+const put = (node, ...kids) => node.replaceChildren(...kids.flat().filter((k) => k != null && k !== false));
 const store = {
   get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage unavailable */ } },
@@ -91,7 +98,9 @@ async function load() {
     const cx = coords.slice(0, -1).reduce((a, c) => a + c[0], 0) / Math.max(1, coords.length - 1);
     const cy = coords.slice(0, -1).reduce((a, c) => a + c[1], 0) / Math.max(1, coords.length - 1);
     const b = { i, id, coords, c: [cx, cy], year: bouwjaar, status, main: functie, funcs: functies, m2, vbo, vboOut, vboReno,
-      adres: adres || "(no address)", postcode: postcode || "", monument, notices, kinds: new Set(notices.flatMap((n) => n.soort)) };
+      adres: adres || "(no address)", postcode: postcode || "", monument,
+      notices: notices.map((n) => ({ ...n, ...classifyNotice(n.titel) })) };
+    b.nsig = new Set(b.notices.flatMap((n) => n.signals));
     b.sig = SIGNALS.filter((s) => s.test(b)).map((s) => s.key);
     b.score = SIGNALS.filter((s) => b.sig.includes(s.key)).reduce((a, s) => a + s.weight, 0);
     b.search = `${b.adres} ${b.postcode} ${b.postcode.replace(/\s/g, "")} ${id}`.toLowerCase();
@@ -192,7 +201,7 @@ function renderLegend() {
   let items;
   if (colourBy === "function") items = Object.values(FUNCS).map((v) => [v.c, v.en]);
   else if (colourBy === "year") items = YEARS.map((y) => [y.c, y.label]);
-  else items = [[css("--s-vacant"), "Out of use / vacancy"], [css("--s-demo"), "Demolition"], [css("--s-change"), "Change of use"], [css("--s-reno"), "Renovation"], [css("--s-none"), "No signal"]];
+  else items = [[css("--s-vacant"), "Vacancy / temporary use"], [css("--s-demo"), "Demolition"], [css("--s-change"), "Transformation"], [css("--s-reno"), "Renovation"], [css("--s-none"), "No signal"]];
   $("legend").replaceChildren(...items.map(([c, t]) => el("div", {}, el("span", { class: "sw", style: `background:${c}` }), t)));
 }
 
@@ -274,7 +283,7 @@ function renderList() {
     el("div", { class: "li-top" }, el("b", { text: b.adres }), el("span", { class: "m2", text: nf.format(b.m2) + " m²" })),
     el("div", { class: "li-sub", text: [b.postcode, FUNCS[b.main]?.en, b.year && "built " + b.year, b.vbo > 1 && b.vbo + " units"].filter(Boolean).join(" · ") }),
     el("div", { class: "badges" }, badges(b))))));
-  $("results").replaceChildren(head, list, shown.length > LIMIT ? el("p", { class: "more", text: `Showing the first ${LIMIT}. Narrow the filters or zoom the map to see the rest.` }) : null);
+  put($("results"), head, list, shown.length > LIMIT ? el("p", { class: "more", text: `Showing the first ${LIMIT}. Narrow the filters or zoom the map to see the rest.` }) : null);
 }
 
 // ---------- detail ----------
@@ -298,7 +307,7 @@ function renderDetail() {
   };
   const link = (href, text) => el("a", { href, target: "_blank", rel: "noopener", text });
   const d = $("detail");
-  d.replaceChildren(
+  put(d,
     el("button", { type: "button", text: "← Back to list", on: { click: closeDetail } }),
     el("h3", { text: b.adres }),
     el("div", { class: "muted", text: `${b.postcode} Leiden` }),
@@ -311,17 +320,22 @@ function renderDetail() {
       el("dt", { text: "Year built" }), el("dd", { text: b.year || "–" }),
       el("dt", { text: "BAG status" }), el("dd", { text: `${STATUS_EN[b.status] || b.status}` }),
       el("dt", { text: "BAG id" }), el("dd", { text: b.id })),
-    el("h4", { text: `Permit notices (${b.notices.length})` }),
-    el("div", {}, b.notices.length ? b.notices.map((n) => el("div", { class: "notice" }, link(n.url, n.titel), el("div", { class: "muted", text: `${n.datum} · ${n.soort.join(", ")}` })))
-      : el("p", { class: "muted", text: "No demolition, vacancy or change-of-use notices found for this building since the start of the data." })),
+    b.sig.length ? el("p", { class: "why" }, el("b", { text: "Why it's flagged: " }), whyFlagged(b)) : null,
+    el("div", { class: "row" },
+      el("a", { class: "button primary", href: streetView(lat, lon), target: "_blank", rel: "noopener", text: "Walk around in Street View ↗" }),
+      el("button", { type: "button", text: "Aerial view", on: { click: () => aerialView(b) } }),
+      el("button", { type: "button", text: "Copy summary", on: { click: (e) => copySummary(b, e.target) } })),
+    noticesBlock(b, link),
+    el("h4", { text: "Units in this building" }), el("div", { id: "units" }, el("p", { class: "muted", text: "Loading from the BAG…" })),
+    el("h4", { text: "Owner" }), el("div", { id: "owner" }, el("p", { class: "muted", text: "Looking up the cadastral parcel…" })),
     el("h4", { text: "Look further" }),
     el("div", { class: "links" },
-      link(`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lon}`, "Street View (does it look empty?)"),
       link(`https://bagviewer.kadaster.nl/lvbag/bag-viewer/?objectId=${b.id}`, "BAG viewer (all units and history)"),
       b.monument ? link(b.monument, "Rijksmonument register") : null,
-      link("https://www.kadaster.nl/producten/woning/eigendomsinformatie", "Owner: Kadaster ownership information (paid per lookup)"),
+      link("https://www.ep-online.nl/Energylabel/Search", "Energy label (EP-online, search the address)"),
+      link(`https://www.google.com/search?q=${encodeURIComponent(`"${b.adres}" Leiden`)}`, "Who's there? (Google the address)"),
+      link(`https://www.google.com/maps/search/?api=1&query=${lat},${lon}`, "Google Maps"),
       link("https://omgevingswet.overheid.nl/regels-op-de-kaart", "Zoning rules (Omgevingsloket, search the address)")),
-    el("p", { class: "note", text: "Contacting a private owner: you may write to them about their building, but don't keep their personal data longer than needed (AVG/GDPR)." }),
     el("h4", { text: "My follow-up" }),
     el("label", { class: "field" }, el("span", { text: "Status" }),
       el("select", { on: { change: (e) => { saveTrack({ status: e.target.value }); renderList(); renderDetail(); } } },
@@ -332,6 +346,92 @@ function renderDetail() {
   );
   d.hidden = false; $("results").hidden = true;
   $("side").scrollTop = 0;
+  loadMore(b);
+}
+
+// ---------- "more info" helpers ----------
+const streetView = (lat, lon) => `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lon}`;
+function whyFlagged(b) {
+  const parts = [];
+  if (b.sig.includes("vacant")) parts.push(b.status === "Pand buiten gebruik" ? "BAG: building out of use" : `BAG: ${b.vboOut} unit(s) out of use`);
+  if (b.status === "Sloopvergunning verleend") parts.push("BAG: demolition permit granted");
+  if (b.sig.includes("renovation")) parts.push("BAG: under renovation");
+  const seen = new Set();
+  for (const n of b.notices) for (const s of n.signals) {
+    if (seen.has(s)) continue; seen.add(s);
+    parts.push(`${NOTICE_TYPES[s].en.toLowerCase()} (${PHASES[n.phase].toLowerCase()} ${n.datum.slice(0, 7)})`);
+  }
+  if (b.year && b.year < 1980 && ["kantoorfunctie", "industriefunctie", "winkelfunctie"].includes(b.main) && b.m2 >= 1000) parts.push(`large ${FUNCS[b.main].en.toLowerCase()} building from ${b.year}`);
+  return parts.join(" · ");
+}
+function noticesBlock(b, link) {
+  const one = (n) => el("div", { class: "notice" + (n.signals.length ? " strong" : "") }, link(n.url, n.titel.replace(/^[^,]*,\s*/, "")),
+    el("div", { class: "muted" }, el("span", { class: "phase " + n.phase, text: PHASES[n.phase] }), ` ${n.datum} · ${n.types.map((x) => NOTICE_TYPES[x].en).join(", ")}`));
+  const main = b.notices.filter((n) => n.signals.length), minor = b.notices.filter((n) => !n.signals.length);
+  return el("div", {},
+    el("h4", { text: `Permit notices (${b.notices.length})` }),
+    !b.notices.length ? el("p", { class: "muted", text: "No demolition, vacancy, temporary-use or change-of-use permits found for this building since the start of the data." }) : null,
+    main.map(one),
+    minor.length ? (main.length ? el("details", {}, el("summary", { text: `${minor.length} minor notice(s): terraces, sheds, events…` }), minor.map(one)) : minor.map(one)) : null);
+}
+function aerialView(b) {
+  $("basemap").value = "luchtfoto"; map.getSource("base").setTiles([BASEMAPS.luchtfoto]);
+  map.flyTo({ center: b.c, zoom: 18.5, speed: 1.4 });
+}
+async function copySummary(b, btn) {
+  const [lon, lat] = b.c;
+  const lines = [
+    `${b.adres}, ${b.postcode} Leiden`,
+    `${FUNCS[b.main]?.en || "–"} · ${nf.format(b.m2)} m² · built ${b.year || "?"} · ${b.vbo} unit(s)${b.monument ? " · rijksmonument" : ""}`,
+    b.sig.length ? `Flagged: ${whyFlagged(b)}` : null,
+    ...b.notices.filter((n) => n.signals.length).map((n) => `- ${PHASES[n.phase]} ${n.datum}: ${n.titel.replace(/^[^,]*,\s*/, "")} ${n.url}`),
+    owner[b.id]?.text ? `Cadastral parcel: ${owner[b.id].text}` : null,
+    `Street View: ${streetView(lat, lon)}`,
+    `Map: ${location.origin}${location.pathname}#18/${lat.toFixed(5)}/${lon.toFixed(5)}`,
+  ].filter(Boolean).join("\n");
+  try { await navigator.clipboard.writeText(lines); btn.textContent = "Copied ✓"; }
+  catch { prompt("Copy this summary:", lines); }
+  setTimeout(() => { btn.textContent = "Copy summary"; }, 1800);
+}
+
+// Live lookups (PDOK, open, no key): all units in the building, and the cadastral parcel.
+const owner = {};
+async function loadMore(b) {
+  const units = $("units"), own = $("owner");
+  const wfs = (base, params) => fetch(base + "?" + new URLSearchParams({ service: "WFS", version: "2.0.0", request: "GetFeature", outputFormat: "application/json", srsName: "EPSG:4326", ...params })).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); });
+  const filter = `<fes:Filter xmlns:fes="http://www.opengis.net/fes/2.0"><fes:PropertyIsEqualTo><fes:ValueReference>pandidentificatie</fes:ValueReference><fes:Literal>${b.id}</fes:Literal></fes:PropertyIsEqualTo></fes:Filter>`;
+  wfs("https://service.pdok.nl/lv/bag/wfs/v2_0", { typeName: "bag:verblijfsobject", filter, count: 200 }).then((d) => {
+    if (selected !== b) return;
+    const rows = d.features.map((f) => f.properties).sort((x, y) => (x.huisnummer - y.huisnummer) || String(x.huisletter + x.toevoeging).localeCompare(y.huisletter + y.toevoeging));
+    units.replaceChildren(rows.length ? el("table", { class: "units" },
+      el("thead", {}, el("tr", {}, ["Address", "Use", "m²", "Status"].map((h) => el("th", { text: h })))),
+      el("tbody", {}, rows.map((u) => el("tr", { class: /buiten gebruik|Verbouwing/.test(u.status) ? "flag" : "" },
+        el("td", { text: `${u.openbare_ruimte} ${u.huisnummer}${u.huisletter || ""}${u.toevoeging ? "-" + u.toevoeging : ""}` }),
+        el("td", { text: String(u.gebruiksdoel).split(",").map((x) => FUNCS[x]?.en || x).join(", ") }),
+        el("td", { class: "num", text: nf.format(u.oppervlakte) }),
+        el("td", { text: u.status.replace("Verblijfsobject ", "") })))))
+      : el("p", { class: "muted", text: "No units found." }));
+  }).catch(() => { if (selected === b) units.replaceChildren(el("p", { class: "muted", text: "Couldn't reach the BAG right now. Try the BAG viewer link below." })); });
+
+  const [lon, lat] = b.c, dd = 0.0004;
+  wfs("https://service.pdok.nl/kadaster/kadastralekaart/wfs/v5_0", { typeName: "kadastralekaart:Perceel", bbox: `${lat - dd},${lon - dd},${lat + dd},${lon + dd},urn:ogc:def:crs:EPSG::4326`, count: 50 }).then((d) => {
+    if (selected !== b) return;
+    const inPoly = (pt, ring) => { let hit = false; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const [xi, yi] = ring[i], [xj, yj] = ring[j]; if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) hit = !hit; } return hit; };
+    const rings = (g) => g.type === "Polygon" ? [g.coordinates[0]] : g.type === "MultiPolygon" ? g.coordinates.map((p) => p[0]) : [];
+    const f = d.features.find((x) => rings(x.geometry).some((r) => inPoly(b.c, r))) || d.features[0];
+    if (!f) throw new Error("none");
+    const p = f.properties;
+    const text = `${p.kadastraleGemeenteWaarde} ${p.sectie} ${p.perceelnummer} (${nf.format(p.kadastraleGrootteWaarde)} m² plot)`;
+    owner[b.id] = { text };
+    own.replaceChildren(
+      el("p", {}, "Cadastral parcel: ", el("b", { text })),
+      el("p", { class: "note", text: "The parcel under the middle of the building. Large buildings can span several parcels." }),
+      el("p", { class: "muted", text: "Who owns it isn't public for free. Order the owner's name (and for companies their KvK number) from the Kadaster, using this parcel or the address. It costs a few euros per lookup." }),
+      el("div", { class: "row" },
+        el("a", { class: "button", href: "https://www.kadaster.nl/producten/woning/eigendomsinformatie", target: "_blank", rel: "noopener", text: "Look up owner at Kadaster ↗" }),
+        el("button", { type: "button", text: "Copy parcel", on: { click: async (e) => { try { await navigator.clipboard.writeText(`${p.kadastraleGemeenteWaarde} ${p.sectie} ${p.perceelnummer}`); e.target.textContent = "Copied ✓"; } catch { /* clipboard blocked */ } } } })),
+      el("p", { class: "note", text: "Private owner? You may write to them about their building, but don't keep their personal data longer than needed (AVG/GDPR)." }));
+  }).catch(() => { if (selected === b) own.replaceChildren(el("p", { class: "muted" }, "Couldn't find the parcel right now. ", el("a", { href: "https://www.kadaster.nl/producten/woning/eigendomsinformatie", target: "_blank", rel: "noopener", text: "Kadaster ownership information ↗" }))); });
 }
 function closeDetail() {
   selected = null; $("detail").hidden = true; $("results").hidden = false;
@@ -344,7 +444,7 @@ $("btn-export").onclick = () => {
   const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const head = ["bag_id", "address", "postcode", "main_use", "all_uses", "floor_area_m2", "units", "units_out_of_use", "year_built", "bag_status", "signals", "rijksmonument", "permit_notices", "latest_notice", "my_status", "my_note", "lat", "lon"];
   const rows = shown.map((b) => [b.id, b.adres, b.postcode, FUNCS[b.main]?.en, b.funcs.map((x) => FUNCS[x]?.en || x).join("; "), b.m2, b.vbo, b.vboOut, b.year,
-    STATUS_EN[b.status] || b.status, b.sig.join("; "), b.monument ? "yes" : "", b.notices.length, b.notices[0]?.titel || "", track[b.id]?.status || "", track[b.id]?.note || "", b.c[1].toFixed(6), b.c[0].toFixed(6)]);
+    STATUS_EN[b.status] || b.status, b.sig.join("; "), b.monument ? "yes" : "", b.notices.filter((n) => n.signals.length).length, b.notices.find((n) => n.signals.length)?.titel || "", track[b.id]?.status || "", track[b.id]?.note || "", b.c[1].toFixed(6), b.c[0].toFixed(6)]);
   const csv = [head, ...rows].map((r) => r.map(q).join(",")).join("\n");
   const a = el("a", { href: URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv" })), download: `leiden-buildings-${new Date().toISOString().slice(0, 10)}.csv` });
   document.body.append(a); a.click(); a.remove();
@@ -353,7 +453,7 @@ $("btn-export").onclick = () => {
 // ---------- about ----------
 $("btn-about").onclick = () => {
   const d = aboutData;
-  $("about-body").replaceChildren(
+  put($("about-body"),
     el("p", { text: "This map combines open government data for every building in Leiden that has at least one registered unit, so you can find buildings that may be vacant, old or underused, and keep track of which ones you've looked into." }),
     el("h3", { text: "Data" }),
     el("ul", {},
@@ -361,6 +461,7 @@ $("btn-about").onclick = () => {
       el("li", {}, el("b", { text: "Rijksmonumentenregister" }), " (RCE, via PDOK): national monuments."),
       el("li", {}, el("b", { text: "Official notices" }), ` (Gemeenteblad Leiden, since ${d?.bekendmakingen_vanaf || "2023"}): permits that mention demolition, vacancy or change of use, linked to the building by their map location.`)),
     el("p", { class: "muted", text: `Data downloaded on ${d?.gegenereerd || "?"}. The GitHub repository can refresh it automatically every month.` }),
+    el("p", { text: "Each permit is sorted by its title: whole-building demolition, transformation to housing, temporary use and vacancy count as signals; sheds and walls, café terraces, shops changing trade, events and splitting a home are shown but don't count. Refused or withdrawn permits never count." }),
     el("h3", { text: "What the signals mean, and what they don't" }),
     el("ul", {}, SIGNALS.map((s) => el("li", {}, el("b", { text: s.label + ": " }), s.help))),
     el("p", { text: "There is no public register of vacant buildings in the Netherlands, so this is a shortlist, not proof. 'Out of use' in the BAG often means unusable (e.g. during works) rather than simply empty. Always check on site (or in Street View) before contacting an owner." }),
@@ -368,7 +469,8 @@ $("btn-about").onclick = () => {
     el("ol", {},
       el("li", { text: "Pick a quick view, or set filters on signals, use, floor area and year built." }),
       el("li", { text: "Click a building on the map or in the list to see its details and permit notices." }),
-      el("li", { text: "Use Street View and the BAG viewer to check it; look up the owner at the Kadaster if it's interesting." }),
+      el("li", { text: "See why it's flagged, all units in the building (live from the BAG) and its cadastral parcel. Walk around in Street View or switch to the aerial view." }),
+      el("li", { text: "Interesting? Order the owner's name from the Kadaster with the parcel number, and use Copy summary to send the building to someone." }),
       el("li", { text: "Mark its status and add notes. These stay in this browser only; use Export CSV to share or back them up." })),
   );
   $("about").showModal();

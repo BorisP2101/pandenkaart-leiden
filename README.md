@@ -16,9 +16,14 @@ official registers and lets you filter them.
 - **Filter** on signals, main use, floor area, year built, rijksmonument and your
   own follow-up status; search on street, postcode or BAG id
 - **Colour the map** by signals, main use or year built; switch to aerial photos
-- **Click a building** for its details, all permit notices with links, and quick
-  links to Street View, the BAG viewer, the monument register and the Kadaster
-  (owner lookup, paid)
+- **Click a building** for:
+  - why it's flagged, in one line
+  - its permits, sorted into real signals and minor notices (terraces, sheds, events)
+  - every unit in the building, looked up live from the BAG
+  - its cadastral parcel, looked up live, so you can order the owner's name at the Kadaster (paid)
+  - buttons to walk around in Street View, zoom in on the aerial photo, or copy a
+    summary to send to someone, plus links to the BAG viewer, monument register,
+    energy label lookup and zoning rules
 - **Track follow-up**: mark a status (interesting, check on site, owner contacted,
   in talks, not relevant) and add notes. These are stored in your browser only.
 - **Export CSV** of the current selection, including your statuses and notes
@@ -43,9 +48,12 @@ signals give a shortlist, not proof:
 
 - **Out of use (BAG)** is rare: in practice the BAG uses it for buildings that are
   physically unusable, not simply empty. In Leiden only one unit has it.
-- **Demolition** includes notices about demolishing *part* of a building (an
-  extension, a shed). Read the notice.
-- **Change of use** notices range from office-to-housing to a café terrace.
+- Permits are classified by their title (`notices.js`, tested in
+  `test/notices.test.mjs`). **Demolition** only counts for whole buildings;
+  **transformation** only for conversions to housing or shelter; **temporary use**
+  excludes events. Sheds, walls, terraces, shops changing trade and splitting a
+  home are shown but don't count. Refused or withdrawn permits never count. The
+  rules are keyword-based, so the odd notice will land in the wrong bucket.
 
 Always check on site or in Street View before contacting an owner. When the
 owner is a private person, the AVG/GDPR applies: you may write to them about
@@ -56,6 +64,7 @@ their building, but don't keep their personal data longer than needed.
 ```sh
 python3 -m http.server 8080        # then open http://localhost:8080
 python3 scripts/fetch_leiden.py    # refresh the data
+npm test                           # notice classification tests
 ```
 
 To use it for another municipality, change `WOONPLAATS`, `GEMEENTE` and `BBOX`

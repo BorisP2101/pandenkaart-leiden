@@ -126,3 +126,23 @@ dialog a { color: var(--accent); }
   #filters { order: 3; border-right: none; border-top: 1px solid var(--line); }
   .head-actions { margin-left: 0; }
 }
+
+/* more info */
+a.button {
+  display: inline-flex; align-items: center; min-height: 36px; padding: 6px 11px; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--fg); text-decoration: none;
+}
+a.button:hover { border-color: var(--fg); }
+a.button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
+.why { font-size: 13px; background: var(--hover); border-radius: 6px; padding: 8px 10px; margin: 10px 0 0; }
+.notice.strong { border-left-color: var(--accent); }
+.phase { font-size: 11px; font-weight: 600; padding: 0 5px; border-radius: 3px; background: var(--hover); color: var(--fg); }
+.phase.granted { background: #d9efdc; color: #1f5e2b; }
+.phase.applied { background: #fdf0cf; color: #6b4e00; }
+.phase.refused, .phase.withdrawn { background: #f6dcd9; color: #7a221a; }
+details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
+table.units { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.units th { text-align: left; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--line); padding: 3px 4px; }
+table.units td { border-bottom: 1px solid var(--line); padding: 4px; vertical-align: top; }
+table.units td.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.units tr.flag td { color: var(--s-vacant); font-weight: 600; }
