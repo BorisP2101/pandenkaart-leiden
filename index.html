@@ -13,12 +13,20 @@
     <h1>Leiden Building Finder <span class="tag">prototype</span></h1>
     <p id="summary" class="muted">Loading open data…</p>
     <div class="head-actions">
-      <button id="btn-export" type="button">Export CSV</button>
-      <button id="btn-about" type="button">How it works</button>
+      <button id="btn-export" type="button" aria-label="Export CSV"><span class="long">Export CSV</span><span class="short">CSV</span></button>
+      <button id="btn-about" type="button" aria-label="How it works"><span class="long">How it works</span><span class="short">?</span></button>
     </div>
   </header>
 
   <main>
+    <!-- Phone only: the bar on top of the bottom sheet (drag or tap to resize, switch tabs). -->
+    <div id="sheetbar" role="toolbar" aria-label="Panel">
+      <div class="handle" aria-hidden="true"></div>
+      <div class="sheet-tabs" role="tablist">
+        <button type="button" role="tab" data-tab="list" aria-selected="true">List <span id="sb-count"></span></button>
+        <button type="button" role="tab" data-tab="filters" aria-selected="false">Filters</button>
+      </div>
+    </div>
     <aside id="filters" aria-label="Filters">
       <section>
         <h2>Quick views</h2>

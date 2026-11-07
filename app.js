@@ -231,6 +231,7 @@ function initMap() {
         { id: "sel-pt", type: "circle", source: "sel", maxzoom: 14, paint: { "circle-radius": 7, "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#111", "circle-stroke-width": 2.5 } },
       ],
     },
+    attributionControl: { compact: true },
     hash: true, center: [4.4935, 52.1585], zoom: 13, maxBounds: [[4.3, 52.08], [4.7, 52.24]],
   });
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
@@ -239,6 +240,7 @@ function initMap() {
   for (const layer of ["b-fill", "pts"]) {
     map.on("mousemove", layer, (e) => {
       map.getCanvas().style.cursor = "pointer";
+      if (matchMedia("(hover: none)").matches) return; // touch screens: no hover label
       const b = B[e.features[0].properties.i];
       pop.setLngLat(e.lngLat).setHTML("").setDOMContent(el("div", {}, el("b", { text: b.adres }), el("br"), `${FUNCS[b.main]?.en || "–"} · ${nf.format(b.m2)} m² · ${b.year || "?"}`)).addTo(map);
     });
@@ -274,6 +276,7 @@ function badges(b) {
 }
 function renderList() {
   const LIMIT = 300;
+  $("sb-count").textContent = `(${nf.format(shown.length)})`;
   const head = el("div", { class: "res-head" },
     el("b", { text: `${nf.format(shown.length)} buildings` }),
     el("div", { class: "muted", text: `${nf.format(shown.reduce((a, b) => a + b.m2, 0))} m² in total` }),
@@ -292,7 +295,8 @@ function select(b, fly) {
   map.getSource("sel")?.setData({ type: "FeatureCollection", features: [
     { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [b.coords] } },
     { type: "Feature", properties: {}, geometry: { type: "Point", coordinates: b.c } }] });
-  if (fly) map.flyTo({ center: b.c, zoom: Math.max(map.getZoom(), 17), speed: 1.6 });
+  if (isPhone()) { setTab("list"); if (sheetPx() < sheetSizes().mid) setSheet(sheetSizes().mid); }
+  if (fly || isPhone()) map.flyTo({ center: b.c, zoom: Math.max(map.getZoom(), 17), speed: 1.6, padding: mapPadding() });
   renderDetail();
 }
 function renderDetail() {
@@ -312,6 +316,11 @@ function renderDetail() {
     el("h3", { text: b.adres }),
     el("div", { class: "muted", text: `${b.postcode} Leiden` }),
     el("div", { class: "badges", style: "margin-top:8px" }, badges(b)),
+    b.sig.length ? el("p", { class: "why" }, el("b", { text: "Why it's flagged: " }), whyFlagged(b)) : null,
+    el("div", { class: "row" },
+      el("a", { class: "button primary", href: streetView(lat, lon), target: "_blank", rel: "noopener", text: "Walk around in Street View ↗" }),
+      el("button", { type: "button", text: "Aerial view", on: { click: () => aerialView(b) } }),
+      el("button", { type: "button", text: "Copy summary", on: { click: (e) => copySummary(b, e.target) } })),
     el("dl", { class: "kv" },
       el("dt", { text: "Main use" }), el("dd", { text: FUNCS[b.main]?.en || "–" }),
       b.funcs.length > 1 ? [el("dt", { text: "All uses" }), el("dd", { text: b.funcs.map((x) => FUNCS[x]?.en || x).join(", ") })] : null,
@@ -320,11 +329,6 @@ function renderDetail() {
       el("dt", { text: "Year built" }), el("dd", { text: b.year || "–" }),
       el("dt", { text: "BAG status" }), el("dd", { text: `${STATUS_EN[b.status] || b.status}` }),
       el("dt", { text: "BAG id" }), el("dd", { text: b.id })),
-    b.sig.length ? el("p", { class: "why" }, el("b", { text: "Why it's flagged: " }), whyFlagged(b)) : null,
-    el("div", { class: "row" },
-      el("a", { class: "button primary", href: streetView(lat, lon), target: "_blank", rel: "noopener", text: "Walk around in Street View ↗" }),
-      el("button", { type: "button", text: "Aerial view", on: { click: () => aerialView(b) } }),
-      el("button", { type: "button", text: "Copy summary", on: { click: (e) => copySummary(b, e.target) } })),
     noticesBlock(b, link),
     el("h4", { text: "Units in this building" }), el("div", { id: "units" }, el("p", { class: "muted", text: "Loading from the BAG…" })),
     el("h4", { text: "Owner" }), el("div", { id: "owner" }, el("p", { class: "muted", text: "Looking up the cadastral parcel…" })),
@@ -476,9 +480,67 @@ $("btn-about").onclick = () => {
   $("about").showModal();
 };
 
+// ---------- phone: bottom sheet ----------
+const phoneQuery = matchMedia("(max-width: 820px)");
+const isPhone = () => phoneQuery.matches;
+const BAR = 52;
+const sheetSizes = () => {
+  const avail = innerHeight - 52 - BAR; // below the header, above the bar
+  return { min: Math.round(avail * 0.18), mid: Math.round(avail * 0.45), max: Math.round(avail - 24) };
+};
+let sheet = null;
+const sheetPx = () => sheet ?? sheetSizes().mid;
+function setSheet(px) {
+  const s = sheetSizes();
+  sheet = Math.max(0, Math.min(s.max, px));
+  document.documentElement.style.setProperty("--sheet", sheet + "px");
+}
+const mapPadding = () => (isPhone() ? { top: 90, bottom: sheetPx() + BAR + 16, left: 20, right: 20 } : { top: 40, bottom: 40, left: 40, right: 40 });
+function setTab(tab) {
+  document.body.dataset.tab = tab;
+  document.querySelectorAll(".sheet-tabs button").forEach((b) => b.setAttribute("aria-selected", b.dataset.tab === tab ? "true" : "false"));
+}
+function initSheet() {
+  setTab("list");
+  if (isPhone()) setSheet(sheetSizes().mid);
+  const bar = $("sheetbar");
+  let drag = null;
+  bar.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("button")) return; // the tabs are buttons
+    bar.setPointerCapture(e.pointerId);
+    drag = { y: e.clientY, start: sheetPx(), moved: false };
+    document.body.classList.add("dragging");
+  });
+  bar.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const dy = drag.y - e.clientY;
+    if (Math.abs(dy) > 6) drag.moved = true;
+    if (drag.moved) setSheet(drag.start + dy);
+  });
+  const end = () => {
+    if (!drag) return;
+    document.body.classList.remove("dragging");
+    const s = sheetSizes(), now = sheetPx();
+    if (!drag.moved) { // a tap cycles small → medium → large → small
+      setSheet(now < s.mid - 10 ? s.mid : now < s.max - 10 ? s.max : s.min);
+    } else { // snap to the nearest size
+      setSheet([s.min, s.mid, s.max].reduce((a, v) => (Math.abs(v - now) < Math.abs(a - now) ? v : a)));
+    }
+    drag = null;
+  };
+  bar.addEventListener("pointerup", end);
+  bar.addEventListener("pointercancel", end);
+  document.querySelectorAll(".sheet-tabs button").forEach((b) => b.addEventListener("click", () => {
+    setTab(b.dataset.tab);
+    if (sheetPx() < sheetSizes().mid) setSheet(sheetSizes().mid);
+  }));
+  addEventListener("resize", () => { if (isPhone()) setSheet(Math.min(sheetPx(), sheetSizes().max)); });
+}
+
 // ---------- start ----------
 (async () => {
   // The list and filters don't wait for the map: map tiles can be slow.
+  initSheet();
   const mapReady = initMap();
   try {
     await load();
